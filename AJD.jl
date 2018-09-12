@@ -42,8 +42,13 @@ function sweepAJD!(ops::Array{Array{Complex128,2},1},U::Array{Complex128,2})
 	end
 end
 
-function AJD(ops::Array{Array{Complex128,2},1};max_iter::Int64 = 500, tol::Float64 =1e-6)
-	NN = size(ops[1])[1] #Assume they are all of same size and square
+function AJD(ops::Array{Array{Complex128,2},1};max_iter::Int64 = 500, tol::Float64 =1e-14)
+	for A=ops
+		NN, MM = size(ops])
+		if NN!=MM
+			error("At least one matrix is not square.")
+		end
+	end
 	U = eye(Complex128,NN)
 	newOps = copy(ops)
 	postSweep::Float64 = sigma2mult(newOps)
@@ -54,10 +59,47 @@ function AJD(ops::Array{Array{Complex128,2},1};max_iter::Int64 = 500, tol::Float
 		if (preSweep - postSweep)<tol
 			break
 		elseif ii==max_iter
-			info("Completed ",max_iter, " iterations without convergence: ", 
+			info("Completed ",max_iter, " iterations without convergence: ",
 				(preSweep - postSweep), " >= ", tol)
 		end
 	end
 	newOps, U, postSweep
 end
 
+Upp(G::Array{Complex128,2}) = expm((G-G')/2)
+
+function lowerSigma(eps::Float64,ops::Array{Array{Complex128,2},1},G::Array{Complex128,2})
+    newops::Array{Array{Complex128,2},1} = copy(ops)
+    c=1
+    Utemp::Array{Complex128,2} = expm(eps*(G-G')/2)
+    for XX in newops
+        newops[c] = Utemp'*newops[c]*Utemp
+        c+=1
+    end
+    sigma2mult(newops) - sigma2mult(ops)
+end
+
+function step_SteepestDescent!(ops::Array{Array{Complex128,2},1},U::Array{Complex128,2})
+	NN = size(ops[1])[1] #Assume they are all of same size and square
+	G = zeros(Complex128,NN,NN)
+	n = length(ops)
+	for opNum = 1:n
+		G += 2*(ops[opNum]*spdiagm(diag(ops[opNum])) - spdiagm(diag(ops[opNum]))*ops[opNum])
+	end
+
+	optimalStep = optimize(eps -> lowerSigma(eps,ops,G),0,1)
+	epsMin = 0.0
+	if Optim.minimum(optimalStep) < 0.0
+		epsMin = Optim.minimizer(optimalStep)
+	end
+
+	dU = expm(epsMin*(G-G')/2)
+
+	for opNum = 1:n
+		ops[opNum] = dU'*ops[opNum]*dU
+	end
+
+	U[:,:] = U*dU
+
+	epsMin
+end
